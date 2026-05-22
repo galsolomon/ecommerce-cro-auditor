@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Trivia Blitz",
+    "slug": "trivia-blitz",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0F0E17"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.triviablitz.app"
+    },
+    "android": {
+      "package": "com.triviablitz.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F0E17"
+      }
+    },
+    "scheme": "triviablitz",
+    "plugins": ["expo-router"]
+  }
+}
