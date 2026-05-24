@@ -11,7 +11,7 @@ import { planBotMove } from '../utils/bots';
 import Timer from '../components/Timer';
 import AnswerButton from '../components/AnswerButton';
 
-const REVEAL_DELAY  = 2200;
+const REVEAL_DELAY  = 2300;
 const QUESTION_TIME = 15;
 
 export default function GameScreen() {
@@ -24,18 +24,27 @@ export default function GameScreen() {
   const [revealed, setRevealed]       = useState(false);
   const [earnedPts, setEarnedPts]     = useState(0);
   const [botCount, setBotCount]       = useState(0);
+  const [scoreAnim]                   = useState(() => new Animated.Value(0));
 
-  // Refs — declared before effects that use them
-  const timerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
-  const botTimers      = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const timeLeftRef    = useRef(QUESTION_TIME);
-  const revealedRef    = useRef(false);
-  const doRevealRef    = useRef<((ans: string | null, t: number) => void) | null>(null);
-  const fadeIn         = useRef(new Animated.Value(0)).current;
+  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const botTimers   = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const timeLeftRef = useRef(QUESTION_TIME);
+  const revealedRef = useRef(false);
+  const doRevealRef = useRef<((ans: string | null, t: number) => void) | null>(null);
+
+  const questionOpacity  = useRef(new Animated.Value(0)).current;
+  const questionScale    = useRef(new Animated.Value(0.96)).current;
+  const feedbackOpacity  = useRef(new Animated.Value(0)).current;
+  const feedbackScale    = useRef(new Animated.Value(0.8)).current;
+  const scorePopAnim     = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    fadeIn.setValue(0);
-    Animated.timing(fadeIn, { toValue: 1, duration: 350, useNativeDriver: true }).start();
+    questionOpacity.setValue(0);
+    questionScale.setValue(0.96);
+    Animated.parallel([
+      Animated.timing(questionOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.spring(questionScale,   { toValue: 1, useNativeDriver: true, tension: 80, friction: 8 }),
+    ]).start();
   }, [currentQuestionIndex]);
 
   useEffect(() => {
@@ -48,6 +57,8 @@ export default function GameScreen() {
     setRevealed(false);
     setEarnedPts(0);
     setBotCount(0);
+    feedbackOpacity.setValue(0);
+    scorePopAnim.setValue(0);
 
     let answeredBots = 0;
 
@@ -65,9 +76,19 @@ export default function GameScreen() {
       const correct = pickedAnswer === question.correctAnswer;
       const pts = correct ? calculateScore(tLeft) : 0;
       setEarnedPts(pts);
+
       if (pts > 0) {
         dispatch({ type: 'UPDATE_SCORE', payload: { playerId: localPlayerId, points: pts } });
+        Animated.sequence([
+          Animated.spring(scorePopAnim, { toValue: 1, useNativeDriver: true, tension: 100 }),
+          Animated.timing(scorePopAnim, { toValue: 0, duration: 400, delay: 1200, useNativeDriver: true }),
+        ]).start();
       }
+
+      Animated.parallel([
+        Animated.timing(feedbackOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.spring(feedbackScale,   { toValue: 1, useNativeDriver: true, tension: 80, friction: 7 }),
+      ]).start();
 
       Haptics.notificationAsync(
         correct ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error
@@ -81,7 +102,6 @@ export default function GameScreen() {
 
     doRevealRef.current = doReveal;
 
-    // Schedule bots
     const bots = players.filter(p => p.isBot);
     bots.forEach(bot => {
       const move = planBotMove(bot, question);
@@ -94,7 +114,6 @@ export default function GameScreen() {
       botTimers.current.push(t);
     });
 
-    // Countdown
     timerRef.current = setInterval(() => {
       timeLeftRef.current -= 1;
       setTimeLeft(timeLeftRef.current);
@@ -123,7 +142,7 @@ export default function GameScreen() {
   if (!question) {
     return (
       <View style={styles.loading}>
-        <Text style={styles.loadingText}>Loading questions…</Text>
+        <Text style={styles.loadingText}>Loading…</Text>
       </View>
     );
   }
@@ -133,30 +152,67 @@ export default function GameScreen() {
   const localScore = scores[localPlayerId] ?? 0;
   const totalBots  = players.filter(p => p.isBot).length;
 
+  const scorePopScale = scorePopAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] });
+  const scorePopOpacity = scorePopAnim.interpolate({ inputRange: [0, 0.1, 0.8, 1], outputRange: [0, 1, 1, 0] });
+
   return (
-    <LinearGradient colors={['#0F0E17', '#1A1A2E', '#0F0E17']} style={styles.container}>
+    <LinearGradient colors={['#0A0914', '#12112A', '#0A0914']} style={styles.container}>
       <SafeAreaView style={styles.safe}>
         {/* Top bar */}
         <View style={styles.topBar}>
-          <View style={styles.chip}>
-            <Text style={styles.chipText}>Q {qNum}/{totalQ}</Text>
-          </View>
-          <Timer timeLeft={timeLeft} totalTime={QUESTION_TIME} />
-          <View style={styles.chip}>
-            <Text style={styles.chipLabel}>Score</Text>
-            <Text style={styles.chipScore}>{localScore.toLocaleString()}</Text>
+          {/* Q progress dots */}
+          <View style={styles.dotRow}>
+            {Array.from({ length: totalQ }).map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.dot,
+                  i < qNum  && styles.dotDone,
+                  i === qNum - 1 && styles.dotCurrent,
+                ]}
+              />
+            ))}
           </View>
         </View>
 
-        <Text style={styles.categoryLabel}>{question.category}</Text>
+        {/* Timer + score row */}
+        <View style={styles.timerRow}>
+          <View style={styles.scoreBox}>
+            <Text style={styles.scoreLabel}>SCORE</Text>
+            <Text style={styles.scoreValue}>{localScore.toLocaleString()}</Text>
+            {/* Score pop animation */}
+            <Animated.Text
+              style={[
+                styles.scorePop,
+                { opacity: scorePopOpacity, transform: [{ scale: scorePopScale }] },
+              ]}
+            >
+              +{earnedPts}
+            </Animated.Text>
+          </View>
+
+          <Timer timeLeft={timeLeft} totalTime={QUESTION_TIME} />
+
+          <View style={styles.questionBadge}>
+            <Text style={styles.questionNum}>Q</Text>
+            <Text style={styles.questionNumBig}>{qNum}</Text>
+            <Text style={styles.questionNumSub}>/{totalQ}</Text>
+          </View>
+        </View>
+
+        {/* Category chip */}
+        <View style={styles.categoryChip}>
+          <Text style={styles.categoryText}>{question.category}</Text>
+        </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Question */}
-          <Animated.View style={[styles.questionCard, { opacity: fadeIn }]}>
+          {/* Question card */}
+          <Animated.View style={[styles.questionCard, { opacity: questionOpacity, transform: [{ scale: questionScale }] }]}>
+            <View style={styles.qDifficultyDot} />
             <Text style={styles.questionText}>{question.question}</Text>
           </Animated.View>
 
-          {/* Answers */}
+          {/* Answer buttons */}
           <View style={styles.answers}>
             {question.allAnswers.map((ans, idx) => {
               let btnState: 'idle' | 'selected' | 'correct' | 'wrong' | 'disabled' = 'idle';
@@ -174,15 +230,21 @@ export default function GameScreen() {
                   text={ans}
                   color={ANSWER_COLORS[idx]}
                   state={btnState}
+                  index={idx}
                   onPress={() => handleAnswer(ans)}
                 />
               );
             })}
           </View>
 
-          {/* Result feedback */}
+          {/* Feedback */}
           {revealed && (
-            <View style={styles.feedbackBox}>
+            <Animated.View
+              style={[
+                styles.feedbackBox,
+                { opacity: feedbackOpacity, transform: [{ scale: feedbackScale }] },
+              ]}
+            >
               {localAnswer === null ? (
                 <Text style={styles.feedbackTimeout}>⏰ Time's up!</Text>
               ) : localAnswer === question.correctAnswer ? (
@@ -193,16 +255,19 @@ export default function GameScreen() {
               ) : (
                 <>
                   <Text style={styles.feedbackWrong}>❌ Wrong answer</Text>
-                  <Text style={styles.feedbackAnswer}>Correct: {question.correctAnswer}</Text>
+                  <Text style={styles.feedbackCorrectAns}>✅ {question.correctAnswer}</Text>
                 </>
               )}
-            </View>
+            </Animated.View>
           )}
 
           {/* Bot activity */}
           {!revealed && totalBots > 0 && (
             <View style={styles.botBanner}>
-              <Text style={styles.botText}>⚡ {botCount}/{totalBots} players answered</Text>
+              <View style={[styles.botDot, { backgroundColor: botCount > 0 ? COLORS.correct : COLORS.textMuted }]} />
+              <Text style={styles.botText}>
+                {botCount === 0 ? 'Opponents thinking…' : `${botCount}/${totalBots} answered`}
+              </Text>
             </View>
           )}
         </ScrollView>
@@ -213,78 +278,136 @@ export default function GameScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  safe:      { flex: 1 },
-  loading: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  safe: { flex: 1 },
+  loading: { flex: 1, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: COLORS.text, fontSize: 18 },
-  topBar: {
+
+  topBar: { paddingHorizontal: 20, paddingTop: 6, paddingBottom: 4 },
+  dotRow: { flexDirection: 'row', gap: 4, justifyContent: 'center', flexWrap: 'wrap' },
+  dot: {
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: COLORS.cardBorder,
+  },
+  dotDone: { backgroundColor: COLORS.primaryLight + '88' },
+  dotCurrent: { backgroundColor: COLORS.primaryLight, width: 20 },
+
+  timerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  chip: {
+  scoreBox: {
     backgroundColor: COLORS.card,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
-    minWidth: 72,
+    borderRadius: 16,
+    padding: 10,
+    minWidth: 90,
     alignItems: 'center',
+    position: 'relative',
+    overflow: 'visible',
   },
-  chipText:  { color: COLORS.primaryLight, fontSize: 14, fontWeight: '800', textAlign: 'center' },
-  chipLabel: { color: COLORS.textMuted, fontSize: 9, fontWeight: '600', letterSpacing: 0.5 },
-  chipScore: { color: COLORS.primaryLight, fontSize: 15, fontWeight: '800' },
-  categoryLabel: {
-    color: COLORS.textMuted,
+  scoreLabel: { color: COLORS.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1.5 },
+  scoreValue: { color: COLORS.primaryLight, fontSize: 18, fontWeight: '900' },
+  scorePop: {
+    position: 'absolute',
+    top: -22,
+    color: COLORS.gold,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+
+  questionBadge: {
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    borderRadius: 16,
+    padding: 10,
+    minWidth: 90,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  questionNum:    { color: COLORS.textMuted, fontSize: 11, fontWeight: '700' },
+  questionNumBig: { color: COLORS.primaryLight, fontSize: 22, fontWeight: '900' },
+  questionNumSub: { color: COLORS.textMuted, fontSize: 12, fontWeight: '600' },
+
+  categoryChip: {
+    alignSelf: 'center',
+    backgroundColor: COLORS.primary + '22',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: COLORS.primary + '55',
+    marginBottom: 8,
+  },
+  categoryText: {
+    color: COLORS.primaryLight,
     fontSize: 11,
     fontWeight: '700',
-    textAlign: 'center',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginBottom: 4,
+    letterSpacing: 0.8,
   },
+
   content: { paddingHorizontal: 16, paddingBottom: 32 },
   questionCard: {
     backgroundColor: COLORS.card,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
-    borderRadius: 20,
+    borderRadius: 22,
     padding: 22,
-    marginBottom: 14,
+    marginBottom: 16,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  qDifficultyDot: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    height: 3,
+    backgroundColor: COLORS.primary,
+    borderRadius: 2,
   },
   questionText: {
     color: COLORS.text,
     fontSize: 18,
     fontWeight: '700',
-    lineHeight: 26,
+    lineHeight: 27,
     textAlign: 'center',
+    marginTop: 6,
   },
-  answers: { gap: 1 },
+  answers: { gap: 2 },
+
   feedbackBox: {
     alignItems: 'center',
-    paddingVertical: 16,
-    gap: 4,
-  },
-  feedbackCorrect: { color: COLORS.correct, fontSize: 20, fontWeight: '800' },
-  feedbackWrong:   { color: COLORS.wrong,   fontSize: 20, fontWeight: '800' },
-  feedbackTimeout: { color: COLORS.timeout, fontSize: 20, fontWeight: '800' },
-  feedbackPts:     { color: COLORS.gold,    fontSize: 30, fontWeight: '900' },
-  feedbackAnswer:  { color: COLORS.correct, fontSize: 14, fontWeight: '600', marginTop: 4 },
-  botBanner: {
-    alignItems: 'center',
+    paddingVertical: 18,
+    gap: 6,
     backgroundColor: COLORS.card,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
+    marginTop: 8,
+  },
+  feedbackCorrect:    { color: COLORS.correct, fontSize: 20, fontWeight: '800' },
+  feedbackWrong:      { color: COLORS.wrong,   fontSize: 20, fontWeight: '800' },
+  feedbackTimeout:    { color: COLORS.timeout, fontSize: 20, fontWeight: '800' },
+  feedbackPts:        { color: COLORS.gold,    fontSize: 32, fontWeight: '900' },
+  feedbackCorrectAns: { color: COLORS.correct, fontSize: 14, fontWeight: '600' },
+
+  botBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.card,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
     padding: 10,
     marginTop: 8,
   },
+  botDot: { width: 8, height: 8, borderRadius: 4 },
   botText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
 });
