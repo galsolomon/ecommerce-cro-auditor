@@ -291,9 +291,16 @@ def apply_challenges(merged, challenges, warnings):
             target["status_note"] = f"סתירה (מאת {ch['by']}): {ch.get('argument', '')[:200]}"
             target["adjustments"].append(f"סומן להכרעה: ערעור סותר מאת {ch['by']}")
             other = by_id.get(ch.get("conflicts_with") or "")
-            if other and other is not target and other["status"] == "active":
-                other["status"] = "needs-resolution"
-                other["status_note"] = f"סתירה מול {target['id']} (ראה ערעור על {target['id']})"
+            if other and other is not target:
+                mirrored = dict(ch)
+                mirrored["finding_id"] = other["id"]
+                mirrored["conflicts_with"] = target["id"]
+                mirrored["argument"] = f"(סתירה שסומנה על {target['id']}) {ch.get('argument', '')}"
+                other["challenges"].append(mirrored)
+                if other["status"] == "active":
+                    other["status"] = "needs-resolution"
+                    other["status_note"] = f"סתירה מול {target['id']}: {ch.get('argument', '')[:200]}"
+                    other["adjustments"].append(f"סומן להכרעה: סותר את {target['id']} (ערעור מאת {ch['by']})")
         elif v == "reject":
             target["status"] = "rejected-pending"
             target["status_note"] = f"נדחה על ידי {ch['by']}: {ch.get('argument', '')[:200]}"
@@ -410,8 +417,13 @@ def apply_resolutions(merged, by_id, resolutions, warnings):
                 warnings.append(f"override page_type={v} ב-{rid} לא מוכר")
                 continue
             old = target.get(k)
+            if old == v:
+                continue
             target[k] = v
-            target["adjustments"].append(f"הכרעה: {k} שונה מ-{old} ל-{v}")
+            if k in ("recommendation", "title", "metric", "url"):
+                target["adjustments"].append(f"הכרעה: {k} עודכן לפי ההכרעה")
+            else:
+                target["adjustments"].append(f"הכרעה: {k} שונה מ-{old} ל-{v}")
 
 
 def score(f):
