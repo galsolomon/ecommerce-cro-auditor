@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "פלט של סוכן ביקורת (ecommerce-cro-auditor)",
+  "description": "כל סוכן מחזיר קובץ JSON אחד במבנה הזה. כל הטקסטים בעברית. מפתחות השדות באנגלית כדי שהסקריפטים יוכלו לעבד אותם.",
+  "type": "object",
+  "required": ["agent", "summary", "findings"],
+  "properties": {
+    "agent": {
+      "type": "string",
+      "description": "שם התפקיד, זהה לשם קובץ התפקיד: cro-expert, ux-researcher, consumer-psychologist, mobile-expert, accessibility-performance-expert, devils-advocate, או page-scan (לשלב 5)."
+    },
+    "summary": {
+      "type": "string",
+      "description": "שלושה עד חמישה משפטים: מה מצב האתר מזווית התפקיד, מה הבעיה המרכזית, ומה הכי דחוף."
+    },
+    "pages_reviewed": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "כתובות העמודים שנבדקו בפועל. עוזר לזהות סוכן שדילג על חלקים."
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/finding" }
+    },
+    "challenges": {
+      "type": "array",
+      "description": "רק ל-Devil's Advocate: ערעור על ממצא של סוכן אחר.",
+      "items": { "$ref": "#/definitions/challenge" }
+    },
+    "blind_spots": {
+      "type": "array",
+      "description": "רק ל-Devil's Advocate: דברים שאף סוכן לא בדק.",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "finding": {
+      "type": "object",
+      "required": ["id", "title", "page_type", "area", "device", "observation", "problem", "recommendation", "evidence_type", "source", "impact", "confidence", "effort"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^(cro|ux|psy|mob|a11y|da|scan)-[0-9]{3}$",
+          "description": "קידומת התפקיד ומספר רץ: cro-001, ux-014, psy-003, mob-007, a11y-002, da-001, scan-005."
+        },
+        "title": { "type": "string", "description": "כותרת של עד 12 מילים שמתארת את הבעיה, לא את הפתרון." },
+        "page_type": {
+          "type": "string",
+          "enum": ["global", "home", "category", "search", "product", "cart", "checkout", "account", "content", "policy", "other"],
+          "description": "global = מופיע בכל העמודים (כותרת, תפריט, פוטר, ביצועים כלליים)."
+        },
+        "url": { "type": ["string", "null"], "description": "הכתובת המדויקת שבה נצפה הממצא, או null אם הוא גלובלי." },
+        "area": {
+          "type": "string",
+          "description": "האזור באתר. השתמש באחד מאלה כשאפשר: header, navigation, hero, product-gallery, product-info, price, cta, shipping-info, reviews, trust, cart-summary, checkout-form, payment, footer, search, filters, forms, performance, accessibility, copy, images, popups."
+        },
+        "device": { "type": "string", "enum": ["mobile", "desktop", "both"] },
+        "observation": {
+          "type": "string",
+          "description": "מה נצפה בפועל, כולל איפה: שם קובץ צילום מסך, שדה מ-pages.json, או ציטוט מה-HTML. בלי פרשנות."
+        },
+        "problem": { "type": "string", "description": "למה זה פוגע בהמרה: איזה צעד במשפך זה מאט, ואיזה סוג מבקר זה מרתיע." },
+        "recommendation": { "type": "string", "description": "מה בדיוק לשנות, ברמת האלמנט. מספיק מדויק כדי שמפתח יבצע בלי לשאול." },
+        "evidence_type": {
+          "type": "string",
+          "enum": ["fact", "hypothesis", "ab-test"],
+          "description": "fact = מבוסס מחקר או נתון עם ביטחון גבוה. hypothesis = סביר אבל לא הוכח לאתר הזה. ab-test = הכיוון לא ודאי או שהשינוי מסוכן, ולכן חייב ניסוי."
+        },
+        "source": { "type": "string", "description": "העקרון או המחקר שמגבים את הממצא (למשל: 'Baymard, מחקר צ'קאאוט', 'WCAG 2.2 1.4.3', 'Hick's Law'). ריק רק אם באמת אין, ואז evidence_type לא יכול להיות fact." },
+        "impact": { "type": "integer", "minimum": 1, "maximum": 5, "description": "השפעה צפויה על ההמרה. 5 = חוסם רכישה או נוגע לכל המבקרים בצעד קריטי." },
+        "confidence": { "type": "integer", "minimum": 1, "maximum": 5, "description": "כמה בטוח שהשינוי ישפר. 5 = מחקר חזק ותצפית ברורה. 2 = תחושה מקצועית." },
+        "effort": { "type": "integer", "minimum": 1, "maximum": 5, "description": "מאמץ יישום. 1 = שינוי טקסט או CSS. 5 = שינוי ארכיטקטורה, אינטגרציה או פיתוח של שבועות." },
+        "metric": { "type": "string", "description": "המדד שאמור לזוז אם השינוי עבד (למשל: 'שיעור הוספה לעגלה בעמוד מוצר במובייל')." },
+        "screenshot": { "type": ["string", "null"], "description": "שם קובץ צילום המסך שבו רואים את הממצא, אם יש." }
+      }
+    },
+    "challenge": {
+      "type": "object",
+      "required": ["finding_id", "verdict", "argument"],
+      "properties": {
+        "finding_id": { "type": "string", "description": "מזהה הממצא שעליו מערערים." },
+        "verdict": {
+          "type": "string",
+          "enum": ["supports", "weakens", "contradicts", "reject"],
+          "description": "supports = הממצא חזק ואפילו יותר משנכתב. weakens = הממצא סביר אבל הראיה חלשה מהמוצהר. contradicts = יש טיעון נגדי ממשי או ממצא אחר שסותר. reject = הממצא שגוי, לא קיים, או מזיק."
+        },
+        "argument": { "type": "string", "description": "הטיעון עצמו, קונקרטי." },
+        "risk": { "type": "string", "description": "מה עלול להשתבש אם מיישמים את ההמלצה כמו שהיא." },
+        "alternative": { "type": "string", "description": "מה לעשות במקום, אם יש." },
+        "conflicts_with": { "type": "string", "description": "מזהה של ממצא אחר שסותר את זה, אם הסתירה היא בין שני ממצאים." },
+        "suggested_evidence_type": { "type": "string", "enum": ["fact", "hypothesis", "ab-test"] }
+      }
+    }
+  }
+}

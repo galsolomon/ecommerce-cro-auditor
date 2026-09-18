@@ -1,0 +1,21 @@
+{
+  "name": "galsolomon-skills",
+  "owner": {
+    "name": "galsolomon",
+    "url": "https://github.com/galsolomon"
+  },
+  "metadata": {
+    "description": "סקילים ל-Claude מאת galsolomon",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "ecommerce-cro-auditor",
+      "source": "./",
+      "description": "ביקורת CRO מלאה לחנות אונליין בעברית: שישה סוכני AI בתפקידים שונים, סריקה עמוד-עמוד במובייל ובדסקטופ, רשימת שינויים מדורגת לפי השפעה, ביטחון ומאמץ.",
+      "version": "1.0.0",
+      "category": "productivity",
+      "keywords": ["cro", "ecommerce", "ux", "conversion", "hebrew"]
+    }
+  ]
+}

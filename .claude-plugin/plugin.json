@@ -1,0 +1,13 @@
+{
+  "name": "ecommerce-cro-auditor",
+  "version": "1.0.0",
+  "description": "ביקורת CRO מלאה ושיטתית לחנות אונליין בעברית: מחקר, מסמכי ידע, שישה סוכני AI בתפקידים שונים, איחוד וסתירות, סריקה עמוד-עמוד במובייל ובדסקטופ, רשימת שינויים מדורגת ומסווגת, ויישום רק אחרי אישור.",
+  "author": {
+    "name": "galsolomon",
+    "url": "https://github.com/galsolomon"
+  },
+  "homepage": "https://github.com/galsolomon/2-3-game",
+  "repository": "https://github.com/galsolomon/2-3-game",
+  "license": "MIT",
+  "keywords": ["cro", "ecommerce", "ux", "conversion", "audit", "hebrew", "shopify", "woocommerce", "mobile", "accessibility"]
+}
