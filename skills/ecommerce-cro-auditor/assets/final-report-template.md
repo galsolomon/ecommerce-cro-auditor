@@ -75,4 +75,4 @@
 
 ---
 
-הדוח נוצר בעזרת הסקיל `ecommerce-cro-auditor`. שינויים בקוד מתבצעים רק אחרי אישור מפורש של בעלי החנות.
+הדוח נוצר בעזרת הסקיל `ecommerce-cro-auditor` מאת Gal Solomon (https://github.com/galsolomon/ecommerce-cro-auditor). שינויים בקוד מתבצעים רק אחרי אישור מפורש של בעלי החנות.
