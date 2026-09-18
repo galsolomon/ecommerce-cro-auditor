@@ -5,13 +5,13 @@ merge_findings.py: איחוד ממצאי הסוכנים, כפילויות, ער�
 
 מה הסקריפט עושה, בסדר הזה:
   1. טוען ובודק כל קובץ JSON בתיקיית הסוכנים (קובץ או ממצא לא תקין מדווח ומדולג).
-  2. מאחד ממצאים כפולים (אותו סוג עמוד ואזור, טקסט דומה). הסכמה של סוכנים
+  2. מאחד ממצאים כפולים (אותו סוג עמוד, כותרת והמלצה דומות). הסכמה של סוכנים
      בלתי תלויים מעלה ביטחון ב-1.
   3. מיישם את ערעורי ה-Devil's Advocate: supports (רישום), weakens (ביטחון -1,
      עובדה הופכת להשערה), contradicts (סימון להכרעה), reject (הוצאה זמנית).
   4. מוריד "עובדה" ל"השערה" כשאין מקור נקוב או שהביטחון נמוך מ-4.
-  5. מיישם הכרעות מ-resolutions.json (keep / drop / ab-test / merge_into, עם overrides).
-  6. מחשב עדיפות = השפעה × ביטחון × (6 - מאמץ), ושכבה (מיידי / בקרוב / פרויקט / אחר כך).
+  5. מיישם הכרעות מ-resolutions.json (keep / drop / ab-test / merge_into / split, עם overrides).
+  6. מחשב עדיפות = השפעה × ביטחון × (6 - מאמץ), ושכבה: מיידי (80 ומעלה), בקרוב (40 עד 79), פרויקט (השפעה ≥ 4 ומאמץ ≥ 4), אחר כך.
   7. כותב findings.json, findings.md, contradictions.md, stats.md.
 
 דוגמאות:
@@ -188,75 +188,71 @@ def jaccard(a, b):
     return len(a & b) / float(len(a | b))
 
 
-class UnionFind:
-    def __init__(self, n):
-        self.p = list(range(n))
-
-    def find(self, x):
-        while self.p[x] != x:
-            self.p[x] = self.p[self.p[x]]
-            x = self.p[x]
-        return x
-
-    def union(self, a, b):
-        ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self.p[max(ra, rb)] = min(ra, rb)
-
-
 def evidence_rank(e):
     # ab-test "מנצח" (הסיכון נשאר), אחרת החזק יותר
     return {"ab-test": 3, "fact": 2, "hypothesis": 1}.get(e, 1)
 
 
+def compatible(a, b):
+    """שני ממצאים יכולים להיות כפולים רק אם הם על אותו סוג עמוד (או שאחד מהם גלובלי)."""
+    return a["page_type"] == b["page_type"] or "global" in (a["page_type"], b["page_type"])
+
+
 def dedupe(findings, threshold, agreement_bonus):
-    n = len(findings)
-    toks = [tokens(f["title"] + " " + f["recommendation"]) for f in findings]
-    uf = UnionFind(n)
-    for i in range(n):
-        for j in range(i + 1, n):
-            a, b = findings[i], findings[j]
-            if a["area"] != b["area"]:
-                continue
-            if a["page_type"] != b["page_type"] and "global" not in (a["page_type"], b["page_type"]):
+    """
+    אשכול חמדני "כוכב": הממצאים ממוינים לפי חוזק (השפעה, ביטחון), וכל ממצא מצטרף לאשכול הראשון
+    שהממצא הראשי שלו דומה לו מספיק. כל חבר באשכול דומה לראשי, ולכן אין שרשור של ממצאים שונים
+    דרך חוליות ביניים. האזור (area) לא נבדק, כי סוכנים שונים מסמנים אזורים שונים לאותה בעיה.
+    """
+    order = sorted(findings, key=lambda f: (f["impact"], f["confidence"], -f["effort"], f["id"]), reverse=True)
+    toks = {f["id"]: tokens(f["title"] + " " + f["recommendation"]) for f in findings}
+    clusters = []
+    for f in order:
+        placed = False
+        for c in clusters:
+            p = c[0]
+            if not compatible(f, p):
                 continue
             th = threshold
-            if a.get("url") and a.get("url") == b.get("url"):
+            if f.get("url") and f.get("url") == p.get("url"):
                 th = max(0.2, threshold - 0.1)
-            if jaccard(toks[i], toks[j]) >= th:
-                uf.union(i, j)
-    groups = defaultdict(list)
-    for i in range(n):
-        groups[uf.find(i)].append(i)
+            if jaccard(toks[f["id"]], toks[p["id"]]) >= th:
+                c.append(f)
+                placed = True
+                break
+        if not placed:
+            clusters.append([f])
     merged = []
-    for root, idxs in sorted(groups.items()):
-        members = [findings[i] for i in idxs]
-        members.sort(key=lambda f: (f["impact"], f["confidence"], -f["effort"]), reverse=True)
-        primary = dict(members[0])
-        agents = []
-        for m in members:
-            if m["agent"] not in agents:
-                agents.append(m["agent"])
-        primary["agents"] = agents
-        primary["merged_from"] = [m["id"] for m in members]
-        primary["agreement"] = len(agents)
-        primary["adjustments"] = []
-        primary["challenges"] = []
-        primary["status"] = "active"
-        primary["status_note"] = ""
-        if len(members) > 1:
-            best_ev = max(members, key=lambda m: evidence_rank(m["evidence_type"]))["evidence_type"]
-            if best_ev != primary["evidence_type"]:
-                primary["adjustments"].append(f"סוג הראיה נקבע ל-{EVIDENCE_HE[best_ev]} לפי הממצא המאוחד ({', '.join(m['id'] for m in members)})")
-                primary["evidence_type"] = best_ev
-            if len(agents) > 1 and agreement_bonus and primary["confidence"] < 5:
-                primary["confidence"] += 1
-                primary["adjustments"].append(f"ביטחון +1: הסכמה בלתי תלויה של {len(agents)} סוכנים ({', '.join(agents)})")
-            # שומרים את ההמלצות האחרות לעיון
-            others = [m for m in members[1:]]
-            primary["merged_notes"] = [f"{m['id']} ({m['agent']}): {m['recommendation']}" for m in others]
-        merged.append(primary)
+    for members in clusters:
+        merged.append(build_merged(members, agreement_bonus))
     return merged
+
+
+def build_merged(members, agreement_bonus):
+    """בונה ממצא מאוחד מרשימת חברים; הראשון ברשימה הוא הראשי."""
+    primary = dict(members[0])
+    agents = []
+    for m in members:
+        if m["agent"] not in agents:
+            agents.append(m["agent"])
+    primary["agents"] = agents
+    primary["merged_from"] = [m["id"] for m in members]
+    primary["agreement"] = len(agents)
+    primary["adjustments"] = []
+    primary["challenges"] = []
+    primary["status"] = "active"
+    primary["status_note"] = ""
+    primary["members"] = [dict(m) for m in members[1:]]
+    primary["merged_notes"] = [f"{m['id']} ({m['agent']}): {m['title']}. המלצה: {m['recommendation']}" for m in members[1:]]
+    if len(members) > 1:
+        best_ev = max(members, key=lambda m: evidence_rank(m["evidence_type"]))["evidence_type"]
+        if best_ev != primary["evidence_type"]:
+            primary["adjustments"].append(f"סוג הראיה נקבע ל-{EVIDENCE_HE[best_ev]} לפי הממצא המאוחד ({', '.join(m['id'] for m in members)})")
+            primary["evidence_type"] = best_ev
+        if len(agents) > 1 and agreement_bonus and primary["confidence"] < 5:
+            primary["confidence"] += 1
+            primary["adjustments"].append(f"ביטחון +1: הסכמה בלתי תלויה של {len(agents)} סוכנים ({', '.join(agents)})")
+    return primary
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +344,30 @@ def apply_resolutions(merged, by_id, resolutions, warnings):
             target["evidence_type"] = "ab-test"
             target["status_note"] = note
             target["adjustments"].append(f"הכרעה: לניסוי A/B. {note}".strip())
+        elif decision == "split":
+            # מפריד ממצא שאוחד אוטומטית בחזרה לממצא עצמאי
+            member = next((m for m in target.get("members") or [] if m["id"] == rid), None)
+            if not member or target["id"] == rid:
+                warnings.append(f"split ל-{rid}: המזהה אינו חבר מאוחד בתוך ממצא אחר")
+                continue
+            target["members"] = [m for m in target["members"] if m["id"] != rid]
+            target["merged_from"] = [x for x in target["merged_from"] if x != rid]
+            target["merged_notes"] = [n for n in target.get("merged_notes") or [] if not n.startswith(rid + " ")]
+            target["agents"] = []
+            for m in [target] + target["members"]:
+                if m["agent"] not in target["agents"]:
+                    target["agents"].append(m["agent"])
+            target["agreement"] = len(target["agents"])
+            if target["agreement"] == 1 and any(a.startswith("ביטחון +1: הסכמה") for a in target["adjustments"]) and target["confidence"] > 1:
+                target["confidence"] -= 1
+                target["adjustments"].append("ביטחון -1: בונוס ההסכמה בוטל אחרי ההפרדה")
+            target["adjustments"].append(f"הכרעה: {rid} הופרד לממצא עצמאי. {note}".strip())
+            restored = build_merged([member], agreement_bonus=False)
+            restored["adjustments"].append(f"הכרעה: הופרד מ-{target['id']}. {note}".strip())
+            restored["status_note"] = note
+            merged.append(restored)
+            by_id[rid] = restored
+            target = restored
         elif decision == "merge_into":
             dest = by_id.get(res.get("target") or "")
             if not dest or dest is target:
@@ -358,7 +378,9 @@ def apply_resolutions(merged, by_id, resolutions, warnings):
                     dest["agents"].append(a)
             dest["merged_from"] = list(OrderedDict.fromkeys(dest["merged_from"] + target["merged_from"]))
             dest["agreement"] = len(dest["agents"])
-            dest.setdefault("merged_notes", []).append(f"{target['id']} ({target['agent']}): {target['recommendation']}")
+            dest.setdefault("merged_notes", []).append(f"{target['id']} ({target['agent']}): {target['title']}. המלצה: {target['recommendation']}")
+            dest.setdefault("members", []).append({k: v for k, v in target.items() if k not in ("members", "merged_notes", "challenges", "adjustments", "agents", "merged_from", "agreement", "status", "status_note")})
+            dest["members"].extend(target.get("members") or [])
             dest["adjustments"].append(f"אוחד לתוכו {target['id']} לפי הכרעה. {note}".strip())
             target["status"] = "merged"
             target["status_note"] = f"אוחד לתוך {dest['id']}. {note}".strip()
@@ -398,9 +420,9 @@ def score(f):
     f["priority"] = f["impact"] * f["confidence"] * ease
     if f["impact"] >= 4 and f["effort"] >= 4:
         f["tier"] = "פרויקט"
-    elif f["priority"] >= 50:
+    elif f["priority"] >= 80:
         f["tier"] = "מיידי"
-    elif f["priority"] >= 25:
+    elif f["priority"] >= 40:
         f["tier"] = "בקרוב"
     else:
         f["tier"] = "אחר כך"
@@ -424,7 +446,7 @@ def write_findings_md(path, merged, site_note):
     pending = [f for f in merged if f["status"] in ("needs-resolution", "rejected-pending")]
     lines = [f"# ממצאים מאוחדים{site_note}", ""]
     lines.append(f"- פעילים: {len(active)} | דורשים הכרעה: {len(pending)} | נדחו: {sum(1 for f in merged if f['status'] == 'dropped')} | אוחדו: {sum(1 for f in merged if f['status'] == 'merged')}")
-    lines.append("- עדיפות = השפעה × ביטחון × (6 − מאמץ). שכבות: מיידי ≥ 50, בקרוב 25 עד 49, פרויקט = השפעה ≥ 4 ומאמץ ≥ 4, אחר כך < 25.")
+    lines.append("- עדיפות = השפעה × ביטחון × (6 − מאמץ). שכבות: מיידי ≥ 80, בקרוב 40 עד 79, פרויקט = השפעה ≥ 4 ומאמץ ≥ 4, אחר כך < 40.")
     lines.append("")
     lines.append("## לפי שכבה")
     lines.append("")
@@ -604,7 +626,7 @@ def main():
     parser.add_argument("agents_dir", help="תיקיית קובצי הסוכנים (למשל cro-audit/05-agents)")
     parser.add_argument("--out", default=None, help="תיקיית הפלט (ברירת מחדל: <agents_dir>/../06-merged)")
     parser.add_argument("--resolutions", default=None, help="קובץ הכרעות resolutions.json")
-    parser.add_argument("--threshold", type=float, default=0.45, help="סף דמיון לאיחוד כפילויות, 0 עד 1 (ברירת מחדל: 0.45)")
+    parser.add_argument("--threshold", type=float, default=0.35, help="סף דמיון לאיחוד כפילויות, 0 עד 1 (ברירת מחדל: 0.35; נמוך יותר = יותר איחודים)")
     parser.add_argument("--no-agreement-bonus", action="store_true", help="לא להעלות ביטחון על הסכמה בין סוכנים (להרצה סדרתית)")
     parser.add_argument("--sequential", action="store_true", help="לציין ב-stats.md שהסוכנים רצו בזה אחר זה (ולבטל את בונוס ההסכמה)")
     parser.add_argument("--validate-only", action="store_true", help="רק לבדוק תקינות ולדווח, בלי לכתוב פלט")
